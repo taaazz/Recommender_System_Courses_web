@@ -1,45 +1,117 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras import layers  
 from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Embedding, Dense, Flatten, Input, Concatenate
 from tensorflow.keras.models import Model
 
-# Define the RecommenderNet class
-class RecommenderNet(Model):
-    def __init__(self, num_users, num_courses, embedding_size=50, **kwargs):
+
+class RecommenderNet(tf.keras.Model):
+
+    def __init__(self, num_users, num_courses, embedding_size, **kwargs):
         super(RecommenderNet, self).__init__(**kwargs)
+
         self.num_users = num_users
         self.num_courses = num_courses
         self.embedding_size = embedding_size
-        self.user_embedding = Embedding(num_users, embedding_size, embeddings_initializer='he_normal', embeddings_regularizer='l2')
-        self.course_embedding = Embedding(num_courses, embedding_size, embeddings_initializer='he_normal', embeddings_regularizer='l2')
-        self.user_bias = Embedding(num_users, 1)
-        self.course_bias = Embedding(num_courses, 1)
+
+        # Matrix Factorization (MF) Embeddings
+        self.user_embedding_mf = layers.Embedding(
+            num_users,
+            embedding_size,
+            embeddings_initializer='he_normal',
+            embeddings_regularizer=tf.keras.regularizers.l2(1e-4)
+        )
+        self.user_bias_mf = layers.Embedding(num_users, 1)
+        self.courses_embedding_mf = layers.Embedding(
+            num_courses,
+            embedding_size,
+            embeddings_initializer='he_normal',
+            embeddings_regularizer=tf.keras.regularizers.l2(1e-4)
+        )
+        self.courses_bias_mf = layers.Embedding(num_courses, 1)
+
+        # Neural Network (NN) Embeddings
+        self.user_embedding_nn = layers.Embedding(
+            num_users,
+            embedding_size,
+            embeddings_initializer='he_normal',
+            embeddings_regularizer=tf.keras.regularizers.l2(1e-4)
+        )
+        self.courses_embedding_nn = layers.Embedding(
+            num_courses,
+            embedding_size,
+            embeddings_initializer='he_normal',
+            embeddings_regularizer=tf.keras.regularizers.l2(1e-4)
+        )
+
+        # Neural Network Layers
+        self.dense1 = layers.Dense(64, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-4))
+        self.batch_norm1 = layers.BatchNormalization()
+        self.dropout1 = layers.Dropout(0.5)
+        self.dense2 = layers.Dense(32, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-4))
+        self.batch_norm2 = layers.BatchNormalization()
+        self.dropout2 = layers.Dropout(0.5)
+
+        # Output Layer
+        self.output_layer = layers.Dense(1, activation='sigmoid')
 
     def call(self, inputs):
-        user_vector = self.user_embedding(inputs[:, 0])
-        course_vector = self.course_embedding(inputs[:, 1])
-        user_bias = self.user_bias(inputs[:, 0])
-        course_bias = self.course_bias(inputs[:, 1])
+        user_vector_mf = self.user_embedding_mf(inputs[:, 0])
+        user_bias_mf = self.user_bias_mf(inputs[:, 0])
+        courses_vector_mf = self.courses_embedding_mf(inputs[:, 1])
+        courses_bias_mf = self.courses_bias_mf(inputs[:, 1])
 
-        dot_user_course = tf.tensordot(user_vector, course_vector, 2)
+        dot_user_courses_mf = tf.tensordot(user_vector_mf, courses_vector_mf, axes=2)
+        x_mf = dot_user_courses_mf + user_bias_mf + courses_bias_mf
 
-        # Add all the components (dot product + bias terms)
-        x = dot_user_course + user_bias + course_bias
-        return tf.nn.sigmoid(x)
+        user_vector_nn = self.user_embedding_nn(inputs[:, 0])
+        courses_vector_nn = self.courses_embedding_nn(inputs[:, 1])
+
+        user_vector_nn = tf.keras.layers.Flatten()(user_vector_nn)
+        courses_vector_nn = tf.keras.layers.Flatten()(courses_vector_nn)
+
+        concat_nn = tf.keras.layers.Concatenate()([user_vector_nn, courses_vector_nn])
+
+        x_nn = self.dense1(concat_nn)
+        x_nn = self.batch_norm1(x_nn)
+        x_nn = self.dropout1(x_nn)
+        x_nn = self.dense2(x_nn)
+        x_nn = self.batch_norm2(x_nn)
+        x_nn = self.dropout2(x_nn)
+
+        concat_mf_nn = tf.keras.layers.Concatenate()([x_mf, x_nn])
+        output = self.output_layer(concat_mf_nn)
+
+        return output
 
     def get_config(self):
-        return {
+        config = super(RecommenderNet, self).get_config()
+        config.update({
             'num_users': self.num_users,
             'num_courses': self.num_courses,
             'embedding_size': self.embedding_size,
-        }
+        })
+        return config
 
     @classmethod
     def from_config(cls, config):
-        return cls(**config)
+        return cls(
+            num_users=config['num_users'],
+            num_courses=config['num_courses'],
+            embedding_size=config['embedding_size']
+        )
+
+
+tf.keras.utils.get_custom_objects().update({'RecommenderNet': RecommenderNet})
+
+def load_model(model_dir): 
+    model_path = os.path.abspath("recommender_model.keras")
+    model= tf.keras.models.load_model(model_path)
+    return model
 
 # Load the required data and model
 final_df = pd.read_csv('data_prep.csv')
@@ -49,12 +121,17 @@ final_rating_df = pd.read_csv('final_rating_df.csv')
 num_users = final_df['user_id'].nunique()
 num_courses = final_df['course_id'].nunique()
 
+model.save('recommender_model.keras', save_format='keras', include_optimizer=False)
 # Load the model
-model = load_model('recommender_model.h5', custom_objects={'RecommenderNet': RecommenderNet})
+# model = load_model("recommender_model.keras")
+# model.save('recommender_model.keras', save_format='keras')
 
-# Define dictionaries to decode user and course ids (adjust if needed)
-users_decoded = dict(final_df[['user_id', 'user_name']].values)
-courses_decoded = dict(final_df[['course_id', 'name']].values)
+# Load the model using custom_objects
+model = tf.keras.models.load_model('recommender_model.keras', custom_objects={'RecommenderNet': RecommenderNet})
+
+# Create dictionaries to decode user and course ids
+courses_decoded = dict(zip(final_df['course_id'], final_df['name']))
+users_decoded = dict(zip(final_df['user_id'], final_df['user_id']))  
 
 # Define the recommendation function
 def get_recommendations(user_id):
@@ -86,10 +163,7 @@ def get_recommendations(user_id):
 
     return top_courses_user, top_10_recommended_courses
 
-# Streamlit UI
 st.title('Sistem Rekomendasi Kursus')
-
-# Input User ID
 user_id = st.number_input('Masukkan User ID (1 - 281001):', min_value=1, max_value=num_users, step=1)
 
 if st.button('Dapatkan Rekomendasi'):
