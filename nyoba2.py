@@ -114,13 +114,15 @@ def load_model(model_dir):
     return model
 
 # Load the required data and model
-final_df = pd.read_csv('data_prep.csv')
-final_rating_df = pd.read_csv('final_rating_df.csv')
+final_df = pd.read_csv('dataset/data_prep.csv')
+final_rating_df = pd.read_csv('dataset/final_rating_df.csv')
 
 # Adjust the num_users and num_courses according to your data
 num_users = final_df['user_id'].nunique()
 num_courses = final_df['course_id'].nunique()
 
+embedding_size = 50  # Choose an appropriate embedding size
+model = RecommenderNet(num_users, num_courses, embedding_size)
 model.save('recommender_model.keras', save_format='keras', include_optimizer=False)
 # Load the model
 # model = load_model("recommender_model.keras")
@@ -135,38 +137,50 @@ users_decoded = dict(zip(final_df['user_id'], final_df['user_id']))
 
 # Define the recommendation function
 def get_recommendations(user_id):
+    if user_id < 1 or user_id > num_users:
+        raise ValueError("User  ID is out of bounds.")
+
     reviewed_course_by_user = final_df[final_df.user_id == user_id]
-    courses_not_reviewed = final_df[~(final_df.name
-                                      .isin(reviewed_course_by_user.name.values)
-                                      )]['course_id']
-    courses_not_reviewed = list(
-        set(courses_not_reviewed)
-        .intersection(set(courses_decoded.keys()))
-    )
+
+    # Get courses not reviewed by the user
+    courses_not_reviewed = final_df[~(final_df.name.isin(reviewed_course_by_user.name.values))]['course_id']
+    courses_not_reviewed = list(set(courses_not_reviewed).intersection(set(courses_decoded.keys())))
+
+    # Check if there are any courses not reviewed
+    if not courses_not_reviewed:
+        return reviewed_course_by_user, pd.DataFrame(columns=['name', 'course_url', 'rating'])
 
     courses_not_reviewed = [[x] for x in courses_not_reviewed]
     user_courses_array = np.hstack(
         ([[user_id]] * len(courses_not_reviewed), courses_not_reviewed)
     )
 
+    # Ensure that the user_courses_array is valid
+    if np.any(user_courses_array[:, 0] >= num_users) or np.any(user_courses_array[:, 1] >= num_courses):
+        raise ValueError("One or more course IDs are out of bounds.")
+
     ratings = model.predict(user_courses_array, verbose=0).flatten()
     top_ratings_indices = ratings.argsort()[-10:][::-1]
 
-    top_courses_user = reviewed_course_by_user.sort_values(
-        by='rating', ascending=False
-    ).head(10)
+    top_courses_user = reviewed_course_by_user.sort_values(by='rating', ascending=False).head(10)
 
     # Prepare recommendations
-    recommended_courses = final_rating_df[final_rating_df['course_id']
-                                          .isin(top_ratings_indices)]
+    recommended_courses = final_rating_df[final_rating_df['course_id'].isin(top_ratings_indices)]
     top_10_recommended_courses = recommended_courses[['name', 'course_url', 'rating']].head(10)
 
     return top_courses_user, top_10_recommended_courses
 
-st.title('Sistem Rekomendasi Kursus')
+col1, col2 = st.columns([1, 4])  # Create two columns with different widths
+
+with col1:
+    st.image('logo/12.png', use_column_width=True)  # Add your logo here
+
+with col2:
+    st.title('Sistem Rekomendasi Kursus')  # Title in the second column
+
 user_id = st.number_input('Masukkan User ID (1 - 281001):', min_value=1, max_value=num_users, step=1)
 
-if st.button('Dapatkan Rekomendasi'):
+if st.button('Search'):
     if user_id <= num_users:
         top_courses_user, top_10_recommended_courses = get_recommendations(user_id)
         
