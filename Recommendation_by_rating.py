@@ -114,7 +114,7 @@ class RecommenderNet(tf.keras.Model):
 tf.keras.utils.get_custom_objects().update({'RecommenderNet': RecommenderNet})
 
 def load_model(model_dir): 
-    model_path = os.path.abspath("recommender_model.keras")
+    model_path = os.path.abspath("model/recommender_model.keras")
     model= tf.keras.models.load_model(model_path)
     return model
 
@@ -128,7 +128,7 @@ model = RecommenderNet(num_users, num_courses, embedding_size)
 
 @st.cache_resource
 def load_model_cached():
-    model = tf.keras.models.load_model('recommender_model.keras', custom_objects={'RecommenderNet': RecommenderNet})
+    model = tf.keras.models.load_model('model/recommender_model.keras', custom_objects={'RecommenderNet': RecommenderNet})
     return model
 model = load_model_cached()
 
