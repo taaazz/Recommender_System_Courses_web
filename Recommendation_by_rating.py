@@ -204,6 +204,6 @@ if st.button('Search'):
 
         # # Tampilkan tabel dengan kolom: name, course_url, rating
         # st.table(top_10_recommended_courses_sorted[['name', 'course_url', 'rating']])
-
+        # Belum ada
     else:
         st.error("ID user tidak ditemukan.")
